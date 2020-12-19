@@ -1,0 +1,234 @@
+---
+title: "Analysis of Capital Bikeshare Bike Ride"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+#install.packages("ggpubr") #For plotting ECDF plot
+#install.packages("arules") #For plotting ECDF plot
+library("tidyverse")
+library("dplyr")
+library("janitor")
+library("lubridate")
+library("here")
+library("gridExtra")
+library("hms")
+```
+
+# Introduction
+
+Due to increasing volume of traffic in the cities, commuting has become a very tedious task. Additionally, vehicles running on fossil fuel have massive carbon footprints which adversely affect the environment. Therefore, people have started looking at alternate commuting methods to such as bicycles. Rental bike services, Capital Bikeshare have become hugely popular in the United States. The analysis of the data from Capital Bikeshare will help in understanding the trend of the usage of such services. Also, it will help in improving the service.
+
+
+<!--importing data-->
+```{r, include = FALSE}
+file_paths <- list.files(path = here("data", "data_rides"), full.names = TRUE) 
+
+rides_raw <- tibble() 
+
+for (path in file_paths) {
+  rides_new <- read_csv(path)
+  if ("Start station number" %in% colnames(rides_new)) {
+    rides_new <- rides_new %>%
+      mutate(`Start station number` = as.double(`Start station number`))
+  }
+  
+  rides_raw <- bind_rows(rides_raw, rides_new)
+}
+```
+<!--cleaning data - merging redundant variables-->
+```{r}
+data_cleaned <- tibble()
+
+#Removing existing duration column as it will be later calculated from the start date and end date in the column
+data_cleaned <- select(rides_raw, -Duration)  
+
+
+#Merging common variables
+
+data_cleaned %>% 
+  mutate(starting_date = coalesce(`Start date` , `started_at`)) %>%
+  mutate(end_date = coalesce(`End date` , `ended_at`)) %>% 
+  mutate(end_station = coalesce(`End station` , `end_station_name`)) %>%
+  mutate(start_station = coalesce(`Start station` , `start_station_name`)) %>%
+  mutate(member_type = coalesce(`Member type`, `member_casual`)) -> data_cleaned
+```
+<!--Cleaning data-->
+```{r}
+data_final <- tibble()
+data_final <- select(data_cleaned, -(which(names(rides_raw) %in% names(data_cleaned))-1)) #Removing redundant columns
+
+data_final %>% 
+  mutate(duration = as.duration(end_date - starting_date)) ->  data_final
+
+data_final %>% mutate(end_station = as.factor(end_station)) %>% mutate(start_station = as.factor(start_station)) %>% mutate(member_type = as.factor(member_type)) -> data_final
+
+data_final$member_type <- fct_recode(data_final$member_type, casual = "Casual", member = "Member") #renaming the factors generalize throughout the data
+```
+
+# Data
+
+The data used in this analysis has been collected from "https://www.capitalbikeshare.com/system-data". The data gives the details of trip history of the rides taken between January, 2019 to July, 2020. 
+
+The data collected from the aforementioned source includes:
+
+* Starting_date : Gives time and date when the ride started
+* End_date : Gives time and date when the ride ended
+* Duration  : provides duration of the ride
+* Start_station : provides the name of the starting station
+* End_station: provides the name of the destination
+
+
+```{r}
+data_final %>% filter(duration > 0) -> data_final
+data_final <- data_final[c("starting_date", "end_date", "duration", "start_station", "end_station", "member_type")]
+```
+
+# Questions
+
+**How long do people use the bike for?**
+
+***Operationalisation:*** Duration vs. Count of rides taken. The plot between he duration and rides taken and the count for ride for the duration will give the result for how much time on a daily basis do the people usually prefer to avail the ride services.
+
+**What is the relation between the type of membership and the duration of the ride availed?**
+
+***Operationalisation:*** Number of rides and duration for which ride availed for each membership type.
+
+**How the demand has changed from 2019 to mid of 2020?**
+
+***Operationalisation:*** Count of rides availed in each month from begning of 2019 to mid of 2020.
+
+**How frequency of rides vary from the weekend to weekdays?**
+
+***Operationalisation:*** Check count of rides for weekdays and weekends.
+
+**Through out the week, at what time of the day the bike rides are used the most? Is there a pattern between the time of the day and the number of rides taken?**
+
+***Operationalisation:*** Check the number of rides taken during the hour of the day through the entire week.
+
+# Analysis
+
+### How long do people use the bike ride for?
+
+```{r}
+#Histogram to show relation between duration and number of rides
+p1 <-  ggplot(data_final) +
+  geom_histogram(mapping = aes(x = (duration / 60),) , fill = "#87ceeb", color = "#335DFF", binwidth = 2) +
+  scale_x_continuous(limits = c(0,60), expand = c(0,0)) +
+  labs(x = "duration in minutes", y = "number of rides taken", title = "Duration vs Count of Rides") + scale_y_continuous(expand = expansion(mult = c(0, 0.02))) + coord_cartesian(ylim = c(0, 6e+05)) + 
+  annotate(geom  = "rect", xmin  = 5, xmax  = 7, ymin  = 0, ymax  = 5.42e+05,alpha = 0.4, fill  = "#212EEB") + 
+  annotate(geom = "curve", x = 15, y = 5.7e+05, xend = 6, yend = 5.42e+05, curvature = 0.3, arrow = arrow(length = unit(2.5, "mm")),alpha = 0.8) + 
+  annotate(geom = "text", x = 16.4, y = 5.2e+05, label = "Maximum number of rides\n taken for duration of\n 5 mins to 7 mins", hjust = 0.1, vjust = -0.1, lineheight = 0.8, color = "#F0371B") + theme_light()
+
+#Density distribution graph
+p2 <- ggplot(data_final) + geom_density(mapping = aes(x = (duration / 60)))+scale_x_continuous(limits = c(0,60), expand = c(0,0)) + labs(x = "duration in minutes", y = "density", title = "Duration vs density") + scale_y_continuous(expand = expansion(mult = c(0, 0.02))) + theme_light()
+
+#Show both graphs side by side
+grid.arrange(p1, p2, nrow = 1) 
+```
+The above graphs show that most people prefer to rent the ride for about 5 to 10 minutes. Which means, people usually prefers bike ride for traveling comparatively shorter distance.
+
+### What is the relation between the type of membership and the duration of the ride availed?**
+
+
+```{r}
+library(ggpubr)
+library("arules")
+
+data_final %>% mutate(duration = duration / 60) %>% 
+  mutate(duration = as.integer(duration)) -> df 
+a <- ggplot(df, mapping = aes(x = duration)) + scale_x_continuous(limits = c(0,60), expand = c(0,0))
+
+a + stat_ecdf(aes(color = member_type,linetype = member_type), 
+              geom = "line", size = 1.5) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800"))+
+  labs(y = "fraction of users") + scale_y_continuous(expand = expansion(mult = c(0, 0.02))) + theme_light()
+```
+The above graph shows the trend for the duration of bike rides by members and casual users. It is clear form the above distribution curve that the members tend to avail the shorter ride than the casual riders. This can be attributed to the fact that the members under a particular plan, for example "Daily" or "Monthly" plans can avail the rides for unlimited number of times during the span of their subscription to the service. Hence, even for smaller distance, they prefer to avail the ride as the rides are already prepaid. However, the casual users have to pay per ride, hence, the the ride only for the greater distances i.e only when it is necessary and the longer duration.
+
+### How the demand has changed from 2019 to mid of 2020?
+To assess this, we will have look at plot of number of rides taken each month starting from January 2019 to July 2020.
+
+```{r}
+data_final %>%
+  mutate(starting_date = format(as.Date(starting_date), "%Y-%m")) -> temp_data 
+
+temp_data <- temp_data[order(temp_data$starting_date),]
+temp_data %>% group_by(starting_date) %>% count() %>% ggplot(aes(x = starting_date, y = n, fill = starting_date), show.legend = FALSE) + geom_bar(stat = "identity", show.legend = FALSE) +
+  labs(x = "start station", y = "number of rides", title = "Number of rides monthly")  + scale_y_continuous(expand = expansion(mult = c(0, 0.02))) + theme_light() +
+  theme(
+    axis.line.y  = element_blank(),
+    axis.line.x  = element_line(colour = "black"),
+    axis.ticks.y = element_blank(),
+    axis.text.x  = element_text(
+                     angle = 90,
+                     hjust = 1, 
+                     vjust = 0.5 
+                   )
+  )
+```
+Looking at the trend for the year 2019 it can be observed taht the number of rides taken are significantly lesser in monts of January to March and it is fairly consistent in months for April to November. Beyond this dip in the number of rides and be seen upto March, 2020 again. This shows, people prefer ride lesser during the winter season than in the summers. An anomaly can be seen in April 2020, with a sudden dip in demand. This can be attributed to the lockdown due to COVID-19. in the subsequent months rise in demand can be seen as the lockdown eases.
+
+### How density of rides vary from the weekend to weekdays?
+
+To check this we will compare the density curve of duration for the rides taken during weekdays and weekends.
+
+```{r}
+#Creating new column for days of the week
+data_final %>% mutate(week_day = wday(data_final$starting_date, label = TRUE)) %>% mutate(week_day = as.factor(week_day)) -> data_wd
+
+#Creating new column to classify the days in weekdays and weekend
+data_wd %>% mutate(wday_type = fct_recode(data_wd$week_day, "weekdays" = "Mon", "weekdays" = "Tue", "weekdays" = "Wed", "weekdays" = "Thu", "weekdays" = "Fri", "weekends" = "Sat", "weekends" = "Sun")) -> data_wd
+
+#Density plot
+data_wd %>% ggplot() + geom_density(mapping = aes(x = (duration / 60), fill = wday_type), alpha = 0.4) + scale_x_continuous(limits = c(0,60), expand = c(0,0)) + labs(x = "Duration", y = "Density", title = "Comparing ride frequency and duration for weekdays and weekend") + theme_light()
+```
+Looking at the above density plot, it can be observed that more people tend to use bikes over the weekdays however people ride for longer duration on the weekends.
+
+
+
+### Through out the week, at what time of the day the bike rides are used the most? Is there a pattern between the time of the day and the number of rides taken?
+
+To answer the above question, we will have a look at the heat map of the hour vs. the duration  of the ride on each day of the week.
+
+```{r}
+#Extracting hour from the date
+data_test <- data_wd %>% mutate(start_time = round(as.POSIXlt(starting_date, format = "%Y%m%d %H:%M:%S", tz = "UTC"), units = "hours")) %>% mutate(start_time = format.Date(start_time,  "%H:%M:%S")) %>% mutate(start_time = as.factor(start_time))
+```
+
+```{r}
+#Plotting the heat map
+data_test2 <- data_test %>% 
+  mutate(week_day = factor(week_day, levels = c("Mon","Tue", "Wed", "Thu", "Fri", "Sat", "Sun" ))) %>%
+  group_by(duration, week_day, start_time) %>% 
+  summarize(n = n())
+ ggplot(data_test2, aes(start_time, duration/60, fill = n)) + 
+  geom_tile() + labs(x = "hour of the day", y = "duration", title = "Duration of the rides during different hours of day")+ 
+  scale_y_continuous(limits = c(0,60), expand = c(0,0)) + scale_fill_gradient2(low = "green", mid = "yellow", high = "red", na.value = NA) + facet_wrap(~week_day, ncol = 2) + 
+   theme_light() +
+  theme(
+    axis.line.y  = element_blank(),
+    axis.line.x  = element_line(colour = "black"),
+    axis.ticks.y = element_blank(),
+    axis.text.x  = element_text(
+                     angle = 90,
+                     hjust = 1, 
+                     vjust = 0.5 
+                   )
+  )
+```
+
+From the above graphs it can be observed that the rides are most frequently used during the weekdays during 8 a.m to 10 a.m in the morning and 5 p.m to 7 p.m in the evening. This is the peak hour for people to get to work and return from the work. From this it can be concluded that during the weekdays the ride service is mostly used for commuting to and from work places. As opposed to this the most frequent use of rides during the weekends is between 9 am to 7pm. Although the frequency of ride is less but the duration is spread evenly through out this period.
+
+## Conclusion
+
+Following are the kew takeaways from the above analysis:
+
+* People usually prefer shorter rides for about 5 to 10 minutes.
+* Casual riders take longer rides than the members, this is due to the fact that service is prepaid for the members so they do not hesitate to take the shorter rides. 
+* The number of rides are less during the winter season.
+* Peak ride hours during the weekdays are 8 am to 10 am and 5 pm to 7 pm. This shows people mostly use the service for commuting to and from work.
+* More people avail the ride service during the weekdays however longer rides are preferred over the weekends.
+
+**Further research is needed to ascertain the reason of why the frequency of rides are less during the weekends although people are free during the entire weekends and the ride services and be used for leisure? And other than commuting to work places how the service can be made more attractive for recreational activities?**
