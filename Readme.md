@@ -1,4 +1,4 @@
-This project is to analyze the effect on the ride sharing of capital bike share company.
+This project is to analyze the effect of covid on the ride sharing of capital bike share company.
 
 The data has been taken from `https://www.capitalbikeshare.com/system-data`.
 
